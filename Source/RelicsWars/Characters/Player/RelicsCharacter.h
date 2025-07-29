@@ -21,13 +21,29 @@ public:
 
     // Sprint
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Movement)
-    float WalkSpeed = 400.f;
+    float WalkSpeed = 300.f; // Vitesse de marche réaliste Uncharted 2
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Movement)
-    float SprintSpeed = 800.f;
+    float SprintSpeed = 450.f; // Vitesse de sprint réaliste Uncharted 2
     UPROPERTY(BlueprintReadOnly, Category = Movement)
     bool bIsSprinting = false;
     void StartSprint();
     void StopSprint();
+
+    // Saut Uncharted
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Movement)
+    float JumpForwardSpeed = 600.f;
+    virtual void Jump() override;
+    virtual void Landed(const FHitResult& Hit) override;
+
+    // Animation jumpforward (Uncharted jog)
+    // UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Animation)
+    // UAnimMontage* JumpForwardMontage; // Désactivé, animation pilotée via Animation Blueprint
+
+    // Saut Idle
+    UPROPERTY(BlueprintReadOnly, Category = Movement)
+    bool bIsIdleJump = false;
+    UFUNCTION(BlueprintCallable, Category = Movement)
+    bool IsIdleJumping() const;
 
 protected:
     // SpringArm pour la caméra third-person épaule gauche

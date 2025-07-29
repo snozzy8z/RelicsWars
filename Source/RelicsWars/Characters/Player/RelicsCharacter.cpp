@@ -14,8 +14,8 @@ ARelicsCharacter::ARelicsCharacter()
     , CharacterRotationInterpSpeed(8.0f)
     , CameraSocketOffset(0.f, 75.f, 65.f)
     , TargetSocketOffset(0.f, 75.f, 65.f)
-    , WalkSpeed(400.f)
-    , SprintSpeed(800.f)
+    , WalkSpeed(350.f) // Vitesse de marche réaliste Uncharted 2
+    , SprintSpeed(500.f) // Vitesse de sprint réaliste Uncharted 2
     , bIsSprinting(false)
 {
     PrimaryActorTick.bCanEverTick = true;
@@ -36,7 +36,7 @@ ARelicsCharacter::ARelicsCharacter()
     bUseControllerRotationYaw = false;
     GetCharacterMovement()->bOrientRotationToMovement = false;
 
-    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed; // Initialise la vitesse de marche par défaut
 }
 
 void ARelicsCharacter::BeginPlay()
@@ -128,4 +128,35 @@ void ARelicsCharacter::StopSprint()
 {
     bIsSprinting = false;
     GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+}
+
+// Saut Uncharted : override Jump pour appliquer une impulsion vers l'avant
+void ARelicsCharacter::Jump()
+{
+    // Calcule la vitesse horizontale (ignore Z)
+    float Speed2D = GetVelocity().Size2D();
+    // Détecte le saut immobile : vitesse < 10 uu/s
+    bIsIdleJump = (Speed2D < 10.f);
+
+    // Interdit le saut en idle
+    if (bIsIdleJump)
+    {
+        return; // Ignore la demande de saut si idle
+    }
+
+    // Appelle le saut classique ou directionnel
+    Super::Jump();
+    // Animation Blueprint : utilise IsIdleJumping() pour piloter la transition
+}
+
+bool ARelicsCharacter::IsIdleJumping() const
+{
+    return bIsIdleJump;
+}
+
+void ARelicsCharacter::Landed(const FHitResult& Hit)
+{
+    Super::Landed(Hit);
+    bIsIdleJump = false; // Reset du statut à l'atterrissage
+    // FX, son, reset d'états
 }
