@@ -45,6 +45,19 @@ public:
     UFUNCTION(BlueprintCallable, Category = Movement)
     bool IsIdleJumping() const;
 
+    // --- Système de roulade ---
+    UPROPERTY(BlueprintReadOnly, Category = Movement)
+    bool bIsRolling = false; // Statut de roulade
+
+    UFUNCTION(BlueprintCallable, Category = Movement)
+    void StartRoll(); // Démarre la roulade
+
+    UFUNCTION(BlueprintCallable, Category = Movement)
+    bool IsRolling() const; // Ajout de la déclaration de la fonction IsRolling()
+
+    // Statut pour AnimBP
+    FTimerHandle RollTimerHandle; // Handle du timer de roulade
+
 protected:
     // SpringArm pour la caméra third-person épaule gauche
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera)

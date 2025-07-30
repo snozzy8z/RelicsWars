@@ -17,6 +17,7 @@ ARelicsCharacter::ARelicsCharacter()
     , WalkSpeed(350.f) // Vitesse de marche réaliste Uncharted 2
     , SprintSpeed(500.f) // Vitesse de sprint réaliste Uncharted 2
     , bIsSprinting(false)
+    , bIsRolling(false) // Initialise le statut de roulade
 {
     PrimaryActorTick.bCanEverTick = true;
 
@@ -67,9 +68,32 @@ void ARelicsCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
     PlayerInputComponent->BindAxis("LookUp", this, &ARelicsCharacter::LookUp);
     PlayerInputComponent->BindAction("Jump", IE_Pressed, this, &ACharacter::Jump);
     PlayerInputComponent->BindAction("Jump", IE_Released, this, &ACharacter::StopJumping);
-    // Sprint bindings
     PlayerInputComponent->BindAction("Sprint", IE_Pressed, this, &ARelicsCharacter::StartSprint);
     PlayerInputComponent->BindAction("Sprint", IE_Released, this, &ARelicsCharacter::StopSprint);
+    // Bind roulade sur la touche C (action "Roll")
+    PlayerInputComponent->BindAction("Roll", IE_Pressed, this, &ARelicsCharacter::StartRoll);
+}
+
+// --- Système de roulade avant fluide ---
+void ARelicsCharacter::StartRoll()
+{
+    // Si déjà en roulade ou en l'air, ne rien faire
+    if (bIsRolling || GetCharacterMovement()->IsFalling())
+        return;
+
+    bIsRolling = true;
+    // Désactive temporairement les mouvements
+    GetCharacterMovement()->DisableMovement();
+
+    // Utilise un FTimerHandle membre pour la roulade
+    FTimerDelegate RollEndDelegate;
+    RollEndDelegate.BindLambda([this]()
+    {
+        bIsRolling = false;
+        // Réactive le mouvement
+        GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+    });
+    GetWorldTimerManager().SetTimer(RollTimerHandle, RollEndDelegate, 0.8f, false);
 }
 
 // Affecte uniquement la valeur de l'axe
@@ -158,5 +182,10 @@ void ARelicsCharacter::Landed(const FHitResult& Hit)
 {
     Super::Landed(Hit);
     bIsIdleJump = false; // Reset du statut à l'atterrissage
-    // FX, son, reset d'états
+}
+
+// Retourne le statut de roulade pour l'AnimBP
+bool ARelicsCharacter::IsRolling() const
+{
+    return bIsRolling;
 }
