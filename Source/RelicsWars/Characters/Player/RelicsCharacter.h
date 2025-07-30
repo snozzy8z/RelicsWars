@@ -83,6 +83,20 @@ public:
     UFUNCTION(BlueprintImplementableEvent, Category = "Animation")
     void OnRollStarted();
 
+    // Sprint moderne
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sprint")
+    float SprintDurationMax = 4.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sprint")
+    float SprintCooldown = 2.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Sprint")
+    float SprintTimeLeft = 0.0f;
+    UPROPERTY(BlueprintReadOnly, Category = "Sprint")
+    bool bIsSprintOnCooldown = false;
+    FTimerHandle SprintCooldownTimerHandle;
+    UFUNCTION(BlueprintImplementableEvent, Category = "Sprint")
+    void OnSprintBlockedFeedback();
+    void ResetSprintCooldown();
+
 protected:
     // SpringArm pour la caméra third-person épaule gauche
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera)

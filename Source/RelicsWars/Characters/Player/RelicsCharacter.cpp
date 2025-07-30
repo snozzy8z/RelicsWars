@@ -76,6 +76,28 @@ void ARelicsCharacter::Tick(float DeltaTime)
         });
         GetWorldTimerManager().SetTimer(RecoverTimerHandle, DelayedJumpDelegate, 0.05f, false);
     }
+    // Gestion du sprint
+    if (bIsSprinting)
+    {
+        SprintTimeLeft -= DeltaTime;
+        if (SprintTimeLeft <= 0.0f)
+        {
+            bIsSprinting = false;
+            bIsSprintOnCooldown = true;
+            GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+            SprintTimeLeft = 0.0f;
+            GetWorldTimerManager().SetTimer(
+                SprintCooldownTimerHandle, this, &ARelicsCharacter::ResetSprintCooldown, SprintCooldown, false
+            );
+        }
+    }
+    else
+    {
+        if (!bIsSprintOnCooldown && SprintTimeLeft < SprintDurationMax)
+        {
+            SprintTimeLeft = FMath::Min(SprintDurationMax, SprintTimeLeft + DeltaTime);
+        }
+    }
 }
 
 void ARelicsCharacter::RotateCharacterToMovement(float DeltaTime)
@@ -201,8 +223,14 @@ void ARelicsCharacter::LookUp(float Value)
 // Sprint : active le sprint
 void ARelicsCharacter::StartSprint()
 {
+    if (bIsSprintOnCooldown || bIsSprinting)
+    {
+        OnSprintBlockedFeedback(); // Feedback BP/FX si sprint bloqué
+        return;
+    }
     bIsSprinting = true;
     GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
+    SprintTimeLeft = SprintDurationMax;
 }
 
 // Sprint : désactive le sprint
@@ -210,6 +238,12 @@ void ARelicsCharacter::StopSprint()
 {
     bIsSprinting = false;
     GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+}
+
+void ARelicsCharacter::ResetSprintCooldown()
+{
+    bIsSprintOnCooldown = false;
+    SprintTimeLeft = SprintDurationMax;
 }
 
 // Saut Uncharted : override Jump pour appliquer une impulsion vers l'avant
