@@ -14,7 +14,7 @@ ARelicsCharacter::ARelicsCharacter()
     , CharacterRotationInterpSpeed(8.0f)
     , CameraSocketOffset(0.f, 75.f, 65.f)
     , TargetSocketOffset(0.f, 75.f, 65.f)
-    , WalkSpeed(350.f) // Vitesse de marche réaliste Uncharted 2
+    , WalkSpeed(400.f) // Vitesse de jog légèrement augmentée
     , SprintSpeed(500.f) // Vitesse de sprint réaliste Uncharted 2
     , bIsSprinting(false)
     , bIsRolling(false) // Initialise le statut de roulade
@@ -43,6 +43,7 @@ ARelicsCharacter::ARelicsCharacter()
     GetCharacterMovement()->bOrientRotationToMovement = true; // Active la rotation automatique vers le déplacement
 
     GetCharacterMovement()->MaxWalkSpeed = WalkSpeed; // Initialise la vitesse de marche par défaut
+    GetCharacterMovement()->JumpZVelocity = 400.f; // Hauteur de saut réduite
 }
 
 void ARelicsCharacter::BeginPlay()
@@ -59,6 +60,7 @@ void ARelicsCharacter::Tick(float DeltaTime)
     {
         CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, TargetSocketOffset, DeltaTime, 6.0f);
     }
+    IsInAir = GetCharacterMovement()->IsFalling(); // Met à jour IsInAir à chaque tick
     // Saut différé : si le joueur veut sauter et le perso est au sol
     if (bWantsToJump && GetCharacterMovement()->IsMovingOnGround())
     {
@@ -132,6 +134,14 @@ void ARelicsCharacter::StartRoll()
     FVector LaunchDir = GetActorForwardVector() * 600.f;
     LaunchCharacter(LaunchDir, true, true);
 
+    OnRollStarted(); // Event BP pour custom logic si besoin
+
+    // Joue le montage de roulade
+    if (RollMontage && GetMesh() && GetMesh()->GetAnimInstance())
+    {
+        GetMesh()->GetAnimInstance()->Montage_Play(RollMontage, 1.0f);
+    }
+
     // Timer pour la fin de la roulade (0.8s)
     FTimerDelegate RollEndDelegate;
     RollEndDelegate.BindLambda([this]()
@@ -154,6 +164,11 @@ void ARelicsCharacter::EndRoll()
     GetCharacterMovement()->BrakingFrictionFactor = SavedBrakingFrictionFactor;
     bIsRolling = false;
     bCanJump = true; // Autorise le saut après la roulade
+    // Stoppe le montage de roulade
+    if (RollMontage && GetMesh() && GetMesh()->GetAnimInstance())
+    {
+        GetMesh()->GetAnimInstance()->Montage_Stop(0.2f, RollMontage);
+    }
 }
 
 // Affecte uniquement la valeur de l'axe
@@ -200,18 +215,17 @@ void ARelicsCharacter::StopSprint()
 // Saut Uncharted : override Jump pour appliquer une impulsion vers l'avant
 void ARelicsCharacter::Jump()
 {
-    // Bloque le saut si le personnage est en train de rouler
-    if (bIsRolling)
-        return;
-    // Anti-spam : empêche le saut si bCanJump est false
-    if (!bCanJump)
-        return;
-    // Si le personnage est au sol, saute immédiatement
+    if (bIsRolling || !bCanJump) return;
     if (!GetCharacterMovement()->IsFalling())
     {
-        bCanJump = false; // Désactive la possibilité de resauter
+        bCanJump = false;
+        bIsJumping = true;
         ACharacter::Jump();
-        // Timer anti-spam : délai augmenté à 1.0s pour éviter tout bug d'animation
+        OnJumpStarted();
+        if (JumpMontage && GetMesh() && GetMesh()->GetAnimInstance())
+        {
+            GetMesh()->GetAnimInstance()->Montage_Play(JumpMontage, 1.0f);
+        }
         FTimerDelegate CanJumpDelegate;
         CanJumpDelegate.BindLambda([this]()
         {
@@ -227,20 +241,23 @@ void ARelicsCharacter::Jump()
     }
 }
 
-bool ARelicsCharacter::IsIdleJumping() const
-{
-    return bIsIdleJump;
-}
-
 void ARelicsCharacter::Landed(const FHitResult& Hit)
 {
     ACharacter::Landed(Hit);
-    // Permet de resauter immédiatement après l'atterrissage
     bIsIdleJump = false;
-    bCanRoll = true; // Autorise la roulade après avoir atterri
-    bCanJump = true; // Autorise le saut après avoir atterri
-    // Synchronisation AnimBP : IsInAir doit suivre GetCharacterMovement()->IsFalling()
-    // (à faire dans l'AnimBP Event Graph)
+    bCanRoll = true;
+    bCanJump = true;
+    bIsJumping = false;
+    IsInAir = false;
+    if (JumpMontage && GetMesh() && GetMesh()->GetAnimInstance())
+    {
+        GetMesh()->GetAnimInstance()->Montage_Stop(0.2f, JumpMontage);
+    }
+}
+
+bool ARelicsCharacter::IsIdleJumping() const
+{
+    return bIsIdleJump;
 }
 
 // Retourne le statut de roulade pour l'AnimBP

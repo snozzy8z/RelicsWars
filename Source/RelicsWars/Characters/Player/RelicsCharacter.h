@@ -71,6 +71,17 @@ public:
     float JumpCooldown = 2.0f; // Cooldown en secondes
     UPROPERTY(BlueprintReadOnly, Category = Movement)
     bool bWantsToJump = false; // Indique si le joueur veut sauter
+    UPROPERTY(BlueprintReadOnly, Category = Movement)
+    bool bIsJumping = false; // True uniquement quand le saut démarre
+    UPROPERTY(BlueprintReadOnly, Category = Movement)
+    bool IsInAir = false; // True si le perso est en l'air
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "Animation")
+    void OnJumpStarted();
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    UAnimMontage* RollMontage;
+    UFUNCTION(BlueprintImplementableEvent, Category = "Animation")
+    void OnRollStarted();
 
 protected:
     // SpringArm pour la caméra third-person épaule gauche
@@ -112,4 +123,7 @@ protected:
     void LookUp(float Value);
     // Rotation fluide du personnage vers la direction du mouvement
     void RotateCharacterToMovement(float DeltaTime);
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+    UAnimMontage* JumpMontage;
 };
