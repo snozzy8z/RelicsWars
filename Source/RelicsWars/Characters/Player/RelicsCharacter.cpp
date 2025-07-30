@@ -188,32 +188,10 @@ void ARelicsCharacter::StopSprint()
 // Saut Uncharted : override Jump pour appliquer une impulsion vers l'avant
 void ARelicsCharacter::Jump()
 {
-    // Anti-spam : empêche le saut si bCanJump est false
-    if (!bCanJump)
+    // Empêche le saut pendant la roulade ou si le personnage est en l'air
+    if (bIsRolling || GetCharacterMovement()->IsFalling())
         return;
-
-    // Calcule la vitesse horizontale (ignore Z)
-    float Speed2D = GetVelocity().Size2D();
-    // Détecte le saut immobile : vitesse < 10 uu/s
-    bIsIdleJump = (Speed2D < 10.f);
-
-    // Interdit le saut en idle
-    if (bIsIdleJump)
-    {
-        return; // Ignore la demande de saut si idle
-    }
-
-    bCanJump = false; // Désactive la possibilité de resauter
     Super::Jump();
-    // Animation Blueprint : utilise IsIdleJumping() pour piloter la transition
-
-    // Timer anti-spam : délai avant de pouvoir resauter (0.2s)
-    FTimerDelegate CanJumpDelegate;
-    CanJumpDelegate.BindLambda([this]()
-    {
-        bCanJump = true;
-    });
-    GetWorldTimerManager().SetTimer(RecoverTimerHandle, CanJumpDelegate, 0.2f, false);
 }
 
 bool ARelicsCharacter::IsIdleJumping() const
