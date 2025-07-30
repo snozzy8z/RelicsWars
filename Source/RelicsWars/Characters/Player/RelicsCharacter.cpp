@@ -19,6 +19,7 @@ ARelicsCharacter::ARelicsCharacter()
     , bIsSprinting(false)
     , bIsRolling(false) // Initialise le statut de roulade
     , bCanRoll(true) // Initialise le statut anti-spam de roulade
+    , bCanJump(true) // Initialise le statut anti-spam de saut
 {
     PrimaryActorTick.bCanEverTick = true;
 
@@ -123,11 +124,17 @@ void ARelicsCharacter::EndRoll()
 // Affecte uniquement la valeur de l'axe
 void ARelicsCharacter::MoveForward(float Value)
 {
+    // Bloque le déplacement si le personnage saute (est en l'air)
+    if (GetCharacterMovement()->IsFalling())
+        return;
     InputDirection.X = Value;
 }
 
 void ARelicsCharacter::MoveRight(float Value)
 {
+    // Bloque le déplacement si le personnage saute (est en l'air)
+    if (GetCharacterMovement()->IsFalling())
+        return;
     InputDirection.Y = Value;
 }
 
@@ -181,6 +188,10 @@ void ARelicsCharacter::StopSprint()
 // Saut Uncharted : override Jump pour appliquer une impulsion vers l'avant
 void ARelicsCharacter::Jump()
 {
+    // Anti-spam : empêche le saut si bCanJump est false
+    if (!bCanJump)
+        return;
+
     // Calcule la vitesse horizontale (ignore Z)
     float Speed2D = GetVelocity().Size2D();
     // Détecte le saut immobile : vitesse < 10 uu/s
@@ -192,9 +203,17 @@ void ARelicsCharacter::Jump()
         return; // Ignore la demande de saut si idle
     }
 
-    // Appelle le saut classique ou directionnel
+    bCanJump = false; // Désactive la possibilité de resauter
     Super::Jump();
     // Animation Blueprint : utilise IsIdleJumping() pour piloter la transition
+
+    // Timer anti-spam : délai avant de pouvoir resauter (0.2s)
+    FTimerDelegate CanJumpDelegate;
+    CanJumpDelegate.BindLambda([this]()
+    {
+        bCanJump = true;
+    });
+    GetWorldTimerManager().SetTimer(RecoverTimerHandle, CanJumpDelegate, 0.2f, false);
 }
 
 bool ARelicsCharacter::IsIdleJumping() const

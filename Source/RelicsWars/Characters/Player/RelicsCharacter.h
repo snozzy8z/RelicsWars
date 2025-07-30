@@ -63,6 +63,8 @@ public:
     float SavedBrakingFrictionFactor = 2.0f; // Stocke la valeur originale
     UPROPERTY(BlueprintReadOnly, Category = Movement)
     bool bCanRoll = true; // Contrôle anti-spam pour la roulade
+    UPROPERTY(BlueprintReadOnly, Category = Movement)
+    bool bCanJump = true; // Contrôle anti-spam pour le saut
 
 protected:
     // SpringArm pour la caméra third-person épaule gauche
