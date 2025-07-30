@@ -77,23 +77,34 @@ void ARelicsCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 // --- Système de roulade avant fluide ---
 void ARelicsCharacter::StartRoll()
 {
-    // Si déjà en roulade ou en l'air, ne rien faire
+    // Vérifie si le personnage peut rouler
     if (bIsRolling || GetCharacterMovement()->IsFalling())
         return;
 
     bIsRolling = true;
-    // Désactive temporairement les mouvements
-    GetCharacterMovement()->DisableMovement();
+    // Stocke la friction originale
+    SavedBrakingFrictionFactor = GetCharacterMovement()->BrakingFrictionFactor;
+    // Désactive temporairement le freinage
+    GetCharacterMovement()->BrakingFrictionFactor = 0.f;
 
-    // Utilise un FTimerHandle membre pour la roulade
+    // Lance le personnage vers l'avant
+    FVector LaunchDir = GetActorForwardVector() * 600.f;
+    LaunchCharacter(LaunchDir, true, true);
+
+    // Timer pour la fin de la roulade (0.8s)
     FTimerDelegate RollEndDelegate;
     RollEndDelegate.BindLambda([this]()
     {
-        bIsRolling = false;
-        // Réactive le mouvement
-        GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+        EndRoll();
     });
     GetWorldTimerManager().SetTimer(RollTimerHandle, RollEndDelegate, 0.8f, false);
+}
+
+void ARelicsCharacter::EndRoll()
+{
+    // Remet la friction originale
+    GetCharacterMovement()->BrakingFrictionFactor = SavedBrakingFrictionFactor;
+    bIsRolling = false;
 }
 
 // Affecte uniquement la valeur de l'axe

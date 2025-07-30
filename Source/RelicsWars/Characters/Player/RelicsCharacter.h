@@ -48,15 +48,19 @@ public:
     // --- Système de roulade ---
     UPROPERTY(BlueprintReadOnly, Category = Movement)
     bool bIsRolling = false; // Statut de roulade
-
+    UPROPERTY(BlueprintReadOnly, Category = Movement)
+    bool bIsRecovering = false; // Statut de récupération post-roulade
     UFUNCTION(BlueprintCallable, Category = Movement)
     void StartRoll(); // Démarre la roulade
-
     UFUNCTION(BlueprintCallable, Category = Movement)
-    bool IsRolling() const; // Ajout de la déclaration de la fonction IsRolling()
-
-    // Statut pour AnimBP
+    void EndRoll(); // Termine la roulade
+    UFUNCTION(BlueprintCallable, Category = Movement)
+    bool IsRolling() const;
+    UFUNCTION(BlueprintCallable, Category = Movement)
+    bool IsRecovering() const { return bIsRecovering; }
     FTimerHandle RollTimerHandle; // Handle du timer de roulade
+    FTimerHandle RecoverTimerHandle; // Handle du timer de récupération
+    float SavedBrakingFrictionFactor = 2.0f; // Stocke la valeur originale
 
 protected:
     // SpringArm pour la caméra third-person épaule gauche
