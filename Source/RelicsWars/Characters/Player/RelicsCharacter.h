@@ -61,6 +61,8 @@ public:
     FTimerHandle RollTimerHandle; // Handle du timer de roulade
     FTimerHandle RecoverTimerHandle; // Handle du timer de récupération
     float SavedBrakingFrictionFactor = 2.0f; // Stocke la valeur originale
+    UPROPERTY(BlueprintReadOnly, Category = Movement)
+    bool bCanRoll = true; // Contrôle anti-spam pour la roulade
 
 protected:
     // SpringArm pour la caméra third-person épaule gauche

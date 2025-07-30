@@ -18,6 +18,7 @@ ARelicsCharacter::ARelicsCharacter()
     , SprintSpeed(500.f) // Vitesse de sprint réaliste Uncharted 2
     , bIsSprinting(false)
     , bIsRolling(false) // Initialise le statut de roulade
+    , bCanRoll(true) // Initialise le statut anti-spam de roulade
 {
     PrimaryActorTick.bCanEverTick = true;
 
@@ -77,11 +78,16 @@ void ARelicsCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 // --- Système de roulade avant fluide ---
 void ARelicsCharacter::StartRoll()
 {
-    // Vérifie si le personnage peut rouler
-    if (bIsRolling || GetCharacterMovement()->IsFalling())
+    // Empêche la relance si une roulade est déjà en cours, si le personnage est en l'air, si l'anti-spam est actif ou si idle
+    if (bIsRolling || !bCanRoll || GetCharacterMovement()->IsFalling())
+        return;
+
+    // Bloque la roulade en idle (vitesse horizontale quasi nulle)
+    if (GetVelocity().Size2D() < 10.f)
         return;
 
     bIsRolling = true;
+    bCanRoll = false;
     // Stocke la friction originale
     SavedBrakingFrictionFactor = GetCharacterMovement()->BrakingFrictionFactor;
     // Désactive temporairement le freinage
@@ -96,6 +102,13 @@ void ARelicsCharacter::StartRoll()
     RollEndDelegate.BindLambda([this]()
     {
         EndRoll();
+        // Timer anti-spam : délai avant de pouvoir relancer (0.2s)
+        FTimerDelegate CanRollDelegate;
+        CanRollDelegate.BindLambda([this]()
+        {
+            bCanRoll = true;
+        });
+        GetWorldTimerManager().SetTimer(RecoverTimerHandle, CanRollDelegate, 0.2f, false);
     });
     GetWorldTimerManager().SetTimer(RollTimerHandle, RollEndDelegate, 0.8f, false);
 }
