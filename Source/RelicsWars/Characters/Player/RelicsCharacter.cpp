@@ -1,27 +1,48 @@
-// Copyright (c) 2024. Uncharted 2-inspired Third Person Character for Unreal Engine 5
-#include "RelicsCharacter.h"
+// Copyright Epic Games, Inc. All Rights Reserved.
+#include "RelicsWars/Characters/Player/RelicsCharacter.h"
+#include "GameFramework/SpringArmComponent.h"
+#include "Camera/CameraComponent.h"
+#include "GameFramework/Controller.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/InputComponent.h"
 #include "Kismet/KismetMathLibrary.h"
 
+// Constructeur : initialise la caméra third-person, le spring arm et les paramètres de rotation
 ARelicsCharacter::ARelicsCharacter()
+    : InputDirection(FVector::ZeroVector)
+    , TargetRotation(FRotator::ZeroRotator)
+    , CharacterRotationInterpSpeed(8.0f)
+    , CameraSocketOffset(0.f, 75.f, 65.f)
+    , TargetSocketOffset(0.f, 75.f, 65.f)
+    , WalkSpeed(350.f) // Vitesse de marche réaliste Uncharted 2
+    , SprintSpeed(500.f) // Vitesse de sprint réaliste Uncharted 2
+    , bIsSprinting(false)
+    , bIsRolling(false) // Initialise le statut de roulade
+    , bCanRoll(true) // Initialise le statut anti-spam de roulade
+    , bCanJump(true) // Initialise le statut anti-spam de saut
+    , LastJumpTime(-100.f) // Initialise le temps du dernier saut
+    , JumpCooldown(2.0f) // Cooldown de saut
+    , bWantsToJump(false) // Initialise la demande de saut différé
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // --- Caméra épaule ---
+    // SpringArm pour vue épaule
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
     CameraBoom->TargetArmLength = 300.0f;
     CameraBoom->bUsePawnControlRotation = true;
-    CameraBoom->SocketOffset = TargetSocketOffset;
+    CameraBoom->SocketOffset = CameraSocketOffset;
 
+    // Caméra third-person
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
     FollowCamera->bUsePawnControlRotation = false;
 
+    // Désynchronise la rotation du personnage et de la caméra
     bUseControllerRotationYaw = false;
-    GetCharacterMovement()->bOrientRotationToMovement = false;
-    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+    GetCharacterMovement()->bOrientRotationToMovement = true; // Active la rotation automatique vers le déplacement
+
+    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed; // Initialise la vitesse de marche par défaut
 }
 
 void ARelicsCharacter::BeginPlay()
@@ -29,76 +50,49 @@ void ARelicsCharacter::BeginPlay()
     Super::BeginPlay();
 }
 
-// Tick : gère la rotation douce et la caméra épaule
+// Tick : gère la rotation fluide du personnage et l'interpolation dynamique de la caméra
 void ARelicsCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    bIsFalling = GetCharacterMovement()->IsFalling();
-    // --- Steering subtil pendant la roulade ---
-    if (bIsRolling)
-    {
-        FVector SteerDir = FVector::ZeroVector;
-        if (Controller)
-        {
-            const FRotator Rotation = Controller->GetControlRotation();
-            const FRotator YawRotation(0, Rotation.Yaw, 0);
-            const FVector ForwardDir = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-            const FVector RightDir = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-            SteerDir = ForwardDir * InputDirection.X + RightDir * InputDirection.Y;
-        }
-        if (SteerDir.Size() > 0.05f)
-        {
-            FVector Steer = SteerDir.GetSafeNormal() * SteeringRatio * RollImpulseSpeed * DeltaTime;
-            FVector CurrentVel = GetVelocity();
-            FVector Forward = CurrentVel.GetSafeNormal();
-            float Angle = FMath::RadiansToDegrees(acosf(FVector::DotProduct(Forward, Steer.GetSafeNormal())));
-            if (Angle < RollSteerMaxAngle)
-            {
-                FVector NewVel = CurrentVel + Steer;
-                NewVel = NewVel.GetClampedToMaxSize(RollImpulseSpeed);
-                LaunchCharacter(NewVel, true, false);
-            }
-        }
-    }
-    // --- Steering subtil pendant le saut ---
-    if (bIsJumping && bIsFalling)
-    {
-        FVector SteerDir = FVector::ZeroVector;
-        if (Controller)
-        {
-            const FRotator Rotation = Controller->GetControlRotation();
-            const FRotator YawRotation(0, Rotation.Yaw, 0);
-            const FVector ForwardDir = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-            const FVector RightDir = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-            SteerDir = ForwardDir * InputDirection.X + RightDir * InputDirection.Y;
-        }
-        if (SteerDir.Size() > 0.05f)
-        {
-            FVector Steer = SteerDir.GetSafeNormal() * SteeringRatio * SprintSpeed * DeltaTime;
-            FVector CurrentVel = GetVelocity();
-            FVector Forward = CurrentVel.GetSafeNormal();
-            float Angle = FMath::RadiansToDegrees(acosf(FVector::DotProduct(Forward, Steer.GetSafeNormal())));
-            if (Angle < 20.f)
-            {
-                FVector NewVel = CurrentVel + Steer;
-                NewVel = NewVel.GetClampedToMaxSize(SprintSpeed * 0.65f);
-                LaunchCharacter(NewVel, true, false);
-            }
-        }
-    }
-    // --- Rotation douce et inertie ---
-    if (!bIsRolling && !bRollBlendOut && !bIsJumping && !bIsFalling)
-    {
-        RotateCharacterToMovement(DeltaTime);
-    }
-    // --- Caméra épaule dynamique ---
+    RotateCharacterToMovement(DeltaTime); // Réactivé : le personnage se tourne dans la direction du déplacement
     if (CameraBoom)
     {
-        CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, TargetSocketOffset, DeltaTime, CameraArmInterpSpeed);
+        CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, TargetSocketOffset, DeltaTime, 6.0f);
+    }
+    // Saut différé : si le joueur veut sauter et le perso est au sol
+    if (bWantsToJump && GetCharacterMovement()->IsMovingOnGround())
+    {
+        // Timer court pour garantir la synchronisation AnimBP (50ms)
+        FTimerDelegate DelayedJumpDelegate;
+        DelayedJumpDelegate.BindLambda([this]()
+        {
+            if (bWantsToJump && GetCharacterMovement()->IsMovingOnGround())
+            {
+                ACharacter::Jump();
+                bWantsToJump = false;
+            }
+        });
+        GetWorldTimerManager().SetTimer(RecoverTimerHandle, DelayedJumpDelegate, 0.05f, false);
     }
 }
 
-// Setup des inputs avec gestion des cooldowns et locks d'état
+void ARelicsCharacter::RotateCharacterToMovement(float DeltaTime)
+{
+    // Tourne le personnage dans la direction du déplacement (ZQSD)
+    FVector MoveDir = FVector(InputDirection.X, InputDirection.Y, 0.f);
+    if (MoveDir.Size() > 0.1f)
+    {
+        // Applique le mouvement dans la bonne direction
+        AddMovementInput(MoveDir.GetSafeNormal(), MoveDir.Size());
+        // Interpolation de la rotation du personnage
+        FRotator CurrentRotation = GetActorRotation();
+        FRotator DesiredRotation = MoveDir.Rotation();
+        TargetRotation = FMath::RInterpTo(CurrentRotation, DesiredRotation, DeltaTime, CharacterRotationInterpSpeed);
+        SetActorRotation(TargetRotation);
+    }
+}
+
+// Setup des inputs : bind les axes et actions
 void ARelicsCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
     Super::SetupPlayerInputComponent(PlayerInputComponent);
@@ -107,225 +101,150 @@ void ARelicsCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
     PlayerInputComponent->BindAxis("MoveRight", this, &ARelicsCharacter::MoveRight);
     PlayerInputComponent->BindAxis("Turn", this, &ARelicsCharacter::Turn);
     PlayerInputComponent->BindAxis("LookUp", this, &ARelicsCharacter::LookUp);
-    PlayerInputComponent->BindAction("Jump", IE_Pressed, this, &ARelicsCharacter::Jump);
+    PlayerInputComponent->BindAction("Jump", IE_Pressed, this, &ACharacter::Jump);
+    PlayerInputComponent->BindAction("Jump", IE_Released, this, &ACharacter::StopJumping);
     PlayerInputComponent->BindAction("Sprint", IE_Pressed, this, &ARelicsCharacter::StartSprint);
     PlayerInputComponent->BindAction("Sprint", IE_Released, this, &ARelicsCharacter::StopSprint);
+    // Bind roulade sur la touche C (action "Roll")
     PlayerInputComponent->BindAction("Roll", IE_Pressed, this, &ARelicsCharacter::StartRoll);
 }
 
-// --- Déplacement fluide Naughty Dog ---
+// --- Système de roulade avant fluide ---
+void ARelicsCharacter::StartRoll()
+{
+    // Empêche la relance si une roulade est déjà en cours, si le personnage est en l'air, si l'anti-spam est actif ou si idle
+    if (bIsRolling || !bCanRoll || GetCharacterMovement()->IsFalling())
+        return;
+
+    // Bloque la roulade en idle (vitesse horizontale quasi nulle)
+    if (GetVelocity().Size2D() < 10.f)
+        return;
+
+    bIsRolling = true;
+    bCanRoll = false;
+    bCanJump = false; // Bloque le saut pendant la roulade
+    // Stocke la friction originale
+    SavedBrakingFrictionFactor = GetCharacterMovement()->BrakingFrictionFactor;
+    // Désactive temporairement le freinage
+    GetCharacterMovement()->BrakingFrictionFactor = 0.f;
+
+    // Lance le personnage vers l'avant
+    FVector LaunchDir = GetActorForwardVector() * 600.f;
+    LaunchCharacter(LaunchDir, true, true);
+
+    // Timer pour la fin de la roulade (0.8s)
+    FTimerDelegate RollEndDelegate;
+    RollEndDelegate.BindLambda([this]()
+    {
+        EndRoll();
+        // Timer anti-spam : délai avant de pouvoir relancer (0.2s)
+        FTimerDelegate CanRollDelegate;
+        CanRollDelegate.BindLambda([this]()
+        {
+            bCanRoll = true;
+        });
+        GetWorldTimerManager().SetTimer(RecoverTimerHandle, CanRollDelegate, 0.2f, false);
+    });
+    GetWorldTimerManager().SetTimer(RollTimerHandle, RollEndDelegate, 0.8f, false);
+}
+
+void ARelicsCharacter::EndRoll()
+{
+    // Remet la friction originale
+    GetCharacterMovement()->BrakingFrictionFactor = SavedBrakingFrictionFactor;
+    bIsRolling = false;
+    bCanJump = true; // Autorise le saut après la roulade
+}
+
+// Affecte uniquement la valeur de l'axe
 void ARelicsCharacter::MoveForward(float Value)
 {
-    // Autorise le déplacement pendant la roulade, sauf le saut
-    if (bIsJumping || bIsFalling) return;
-    InputDirection.X = Value;
+    // Bloque le déplacement si le personnage saute (est en l'air)
+    if (GetCharacterMovement()->IsFalling())
+        return;
+    InputDirection.X = -Value; // Inversion : Z = +1 (avant), S = -1 (arrière)
 }
+
 void ARelicsCharacter::MoveRight(float Value)
 {
-    if (bIsJumping || bIsFalling) return;
-    InputDirection.Y = Value;
+    // Bloque le déplacement si le personnage saute (est en l'air)
+    if (GetCharacterMovement()->IsFalling())
+        return;
+    InputDirection.Y = -Value; // ZQSD : Q = -1 (gauche), D = +1 (droite)
 }
+
 void ARelicsCharacter::Turn(float Value)
 {
-    // Autorise la rotation caméra même pendant le saut et la roulade
     AddControllerYawInput(Value);
 }
+
 void ARelicsCharacter::LookUp(float Value)
 {
     AddControllerPitchInput(Value);
 }
 
-// --- Sprint ---
+// Sprint : active le sprint
 void ARelicsCharacter::StartSprint()
 {
-    if (bIsRolling || bRollBlendOut || bIsJumping || bIsFalling) return;
     bIsSprinting = true;
     GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
 }
+
+// Sprint : désactive le sprint
 void ARelicsCharacter::StopSprint()
 {
     bIsSprinting = false;
     GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
 }
 
-// --- Saut Uncharted 2 ---
+// Saut Uncharted : override Jump pour appliquer une impulsion vers l'avant
 void ARelicsCharacter::Jump()
 {
-    // Saut autorisé uniquement si au sol, pas en roulade, pas déjà en saut, pas en cooldown, pas en l'air
-    if (bIsRolling || bRollBlendOut || bIsJumping || bIsFalling || bJumpOnCooldown || GetCharacterMovement()->IsFalling()) return;
-    bIsJumping = true;
-    bJumpOnCooldown = true;
-    // Transforme InputDirection en direction monde alignée à la caméra
-    FVector LaunchDir = FVector::ZeroVector;
-    if (Controller)
+    // Bloque le saut si le personnage est en train de rouler
+    if (bIsRolling)
+        return;
+    // Anti-spam : empêche le saut si bCanJump est false
+    if (!bCanJump)
+        return;
+    // Si le personnage est au sol, saute immédiatement
+    if (!GetCharacterMovement()->IsFalling())
     {
-        const FRotator Rotation = Controller->GetControlRotation();
-        const FRotator YawRotation(0, Rotation.Yaw, 0);
-        const FVector ForwardDir = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-        const FVector RightDir = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-        LaunchDir = ForwardDir * InputDirection.X + RightDir * InputDirection.Y;
+        bCanJump = false; // Désactive la possibilité de resauter
+        ACharacter::Jump();
+        // Timer anti-spam : délai augmenté à 1.0s pour éviter tout bug d'animation
+        FTimerDelegate CanJumpDelegate;
+        CanJumpDelegate.BindLambda([this]()
+        {
+            bCanJump = true;
+        });
+        GetWorldTimerManager().SetTimer(RecoverTimerHandle, CanJumpDelegate, 1.0f, false);
+        bWantsToJump = false;
     }
-    LaunchDir = LaunchDir.Size() > 0.1f ? LaunchDir.GetSafeNormal() : GetActorForwardVector();
-    FVector LaunchImpulse = LaunchDir * (SprintSpeed * 0.65f) + FVector(0,0,JumpUpImpulse);
-    LaunchCharacter(LaunchImpulse, false, true);
-    UE_LOG(LogTemp, Warning, TEXT("Jump: jump started in camera-aligned direction"));
-    // Bloque tout input pendant le saut
-    GetWorldTimerManager().SetTimer(JumpBlendOutTimerHandle, this, &ARelicsCharacter::EndJumpBlendOut, JumpBlendOutTime, false);
-    // Cooldown strict anti-spam
-    GetWorldTimerManager().SetTimer(JumpCooldownHandle, this, &ARelicsCharacter::EndJumpCooldown, JumpCooldown, false);
+    else
+    {
+        bCanJump = true;
+        bWantsToJump = true;
+    }
 }
 
-// Fin du blending du saut : réactive le contrôle après un court délai
-void ARelicsCharacter::EndJumpBlendOut()
+bool ARelicsCharacter::IsIdleJumping() const
 {
-    bIsJumping = false;
+    return bIsIdleJump;
 }
 
-// Fin du cooldown de saut
-void ARelicsCharacter::EndJumpCooldown()
-{
-    bJumpOnCooldown = false;
-}
-
-// Atterrissage : transition AnimBP et restauration du contrôle
 void ARelicsCharacter::Landed(const FHitResult& Hit)
 {
-    Super::Landed(Hit);
-    bIsJumping = false;
-    bIsFalling = false;
+    ACharacter::Landed(Hit);
+    // Permet de resauter immédiatement après l'atterrissage
+    bIsIdleJump = false;
+    bCanRoll = true; // Autorise la roulade après avoir atterri
+    bCanJump = true; // Autorise le saut après avoir atterri
+    // Synchronisation AnimBP : IsInAir doit suivre GetCharacterMovement()->IsFalling()
+    // (à faire dans l'AnimBP Event Graph)
 }
 
-// --- Roulade Uncharted 2 Multiplayer ---
-void ARelicsCharacter::StartRoll()
+// Retourne le statut de roulade pour l'AnimBP
+bool ARelicsCharacter::IsRolling() const
 {
-    // Protection anti-spam : return immédiat avant toute logique si lock d'état
-    if (bIsRolling || bRollBlendOut || bIsJumping || bIsFalling || bRollOnCooldown || GetCharacterMovement()->IsFalling())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("StartRoll IGNORED: bIsRolling=%d, bRollBlendOut=%d, bIsJumping=%d, bIsFalling=%d, bRollOnCooldown=%d"), bIsRolling, bRollBlendOut, bIsJumping, bIsFalling, bRollOnCooldown);
-        return;
-    }
-    // Impossible de lancer une roulade si à l'arrêt
-    FVector RollDir = FVector::ZeroVector;
-    float InputMag = InputDirection.Size();
-    if (Controller)
-    {
-        const FRotator Rotation = Controller->GetControlRotation();
-        const FRotator YawRotation(0, Rotation.Yaw, 0);
-        const FVector ForwardDir = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-        const FVector RightDir = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-        RollDir = ForwardDir * InputDirection.X + RightDir * InputDirection.Y;
-    }
-    if (RollDir.Size() < 0.1f)
-    {
-        RollDir = GetVelocity().Size() > 0.1f ? GetVelocity().GetSafeNormal() : GetActorForwardVector();
-    }
-    else
-    {
-        RollDir = RollDir.GetSafeNormal();
-    }
-    float Speed = GetVelocity().Size();
-    if (Speed < 10.f && InputMag < 0.1f)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("StartRoll ignored: cannot roll while idle!"));
-        return;
-    }
-    // --- Démarrage unique de la roulade ---
-    bIsRolling = true;
-    bIsSprinting = false;
-    bRollOnCooldown = true;
-    SavedFriction = GetCharacterMovement()->GroundFriction;
-    SavedBrakingDeceleration = GetCharacterMovement()->BrakingDecelerationWalking;
-    GetCharacterMovement()->GroundFriction = RollFriction;
-    GetCharacterMovement()->BrakingDecelerationWalking = RollBrakingDeceleration;
-    float Impulse = FMath::Max(SprintSpeed, Speed);
-    LaunchCharacter(RollDir * Impulse, true, false);
-    UE_LOG(LogTemp, Warning, TEXT("StartRoll: roll started in camera-aligned direction"));
-    GetWorldTimerManager().SetTimer(RollTimerHandle, this, &ARelicsCharacter::EndRoll, RollDuration, false);
-    GetWorldTimerManager().SetTimer(RollCooldownHandle, this, &ARelicsCharacter::EndRollCooldown, RollCooldown, false);
-    bBlendOutActive = false;
-}
-
-void ARelicsCharacter::EndRoll()
-{
-    bIsRolling = false;
-    bRollBlendOut = true;
-    // Ne lance le blend-out qu'une seule fois
-    if (!bBlendOutActive)
-    {
-        bBlendOutActive = true;
-        GetWorldTimerManager().SetTimer(RollBlendOutTimerHandle, this, &ARelicsCharacter::EndRollBlendOut, RollBlendOutTime, false);
-        UE_LOG(LogTemp, Warning, TEXT("EndRoll: Blend-out started"));
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("EndRoll: Blend-out already active, ignored"));
-    }
-}
-
-void ARelicsCharacter::EndRollBlendOut()
-{
-    bRollBlendOut = false;
-    bBlendOutActive = false;
-    // Restaure friction et décélération à la valeur d'origine, même si spam
-    GetCharacterMovement()->GroundFriction = 8.0f;
-    GetCharacterMovement()->BrakingDecelerationWalking = 2048.0f;
-    UE_LOG(LogTemp, Warning, TEXT("EndRollBlendOut: Friction and deceleration forcibly restored"));
-    // Restaure le sprint instantanément si le joueur court
-    if (bIsSprinting)
-    {
-        GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
-        UE_LOG(LogTemp, Warning, TEXT("EndRollBlendOut: Sprint speed restored after roll"));
-    }
-}
-
-void ARelicsCharacter::InterpRollFrictionTick()
-{
-    RollFrictionLerpElapsed += 0.01f;
-    float Alpha = FMath::Clamp(RollFrictionLerpElapsed / RollFrictionLerpDuration, 0.f, 1.f);
-    GetCharacterMovement()->GroundFriction = FMath::Lerp(RollFrictionLerpStart, RollFrictionLerpEnd, Alpha);
-    GetCharacterMovement()->BrakingDecelerationWalking = FMath::Lerp(RollBrakingLerpStart, RollBrakingLerpEnd, Alpha);
-    if (Alpha >= 1.f)
-    {
-        GetWorldTimerManager().ClearTimer(RollFrictionLerpTimerHandle);
-    }
-}
-
-void ARelicsCharacter::EndRollCooldown()
-{
-    bRollOnCooldown = false;
-}
-
-// --- Rotation douce du personnage vers la direction d'entrée ---
-void ARelicsCharacter::RotateCharacterToMovement(float DeltaTime)
-{
-    // Bloque rotation pendant la roulade ou le saut ou en l'air
-    if (bIsRolling || bRollBlendOut || bIsJumping || bIsFalling) return;
-    if (Controller)
-    {
-        const FRotator Rotation = Controller->GetControlRotation();
-        const FRotator YawRotation(0, Rotation.Yaw, 0);
-        const FVector ForwardDir = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-        const FVector RightDir = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
-        FVector MoveDir = ForwardDir * InputDirection.X + RightDir * InputDirection.Y;
-        if (MoveDir.Size() > 0.1f)
-        {
-            AddMovementInput(MoveDir.GetSafeNormal(), MoveDir.Size());
-            FRotator CurrentRotation = GetActorRotation();
-            FRotator DesiredRotation = MoveDir.Rotation();
-            TargetRotation = FMath::RInterpTo(CurrentRotation, DesiredRotation, DeltaTime, CharacterRotationInterpSpeed);
-            SetActorRotation(TargetRotation);
-        }
-    }
-}
-
-// --- Cover System (contextuel, fluide) ---
-void ARelicsCharacter::EnterCover()
-{
-    bIsInCover = true;
-    // Animation et logique de couverture pilotées par AnimBP et collision
-}
-void ARelicsCharacter::ExitCover()
-{
-    bIsInCover = false;
-    // Animation et logique de sortie de couverture
+    return bIsRolling;
 }
