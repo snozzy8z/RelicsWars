@@ -20,6 +20,9 @@ ARelicsCharacter::ARelicsCharacter()
     , bIsRolling(false) // Initialise le statut de roulade
     , bCanRoll(true) // Initialise le statut anti-spam de roulade
     , bCanJump(true) // Initialise le statut anti-spam de saut
+    , LastJumpTime(-100.f) // Initialise le temps du dernier saut
+    , JumpCooldown(2.0f) // Cooldown de saut
+    , bWantsToJump(false) // Initialise la demande de saut différé
 {
     PrimaryActorTick.bCanEverTick = true;
 
@@ -56,6 +59,21 @@ void ARelicsCharacter::Tick(float DeltaTime)
     if (CameraBoom)
     {
         CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, TargetSocketOffset, DeltaTime, 6.0f);
+    }
+    // Saut différé : si le joueur veut sauter et le perso est au sol
+    if (bWantsToJump && GetCharacterMovement()->IsMovingOnGround())
+    {
+        // Timer court pour garantir la synchronisation AnimBP (50ms)
+        FTimerDelegate DelayedJumpDelegate;
+        DelayedJumpDelegate.BindLambda([this]()
+        {
+            if (bWantsToJump && GetCharacterMovement()->IsMovingOnGround())
+            {
+                Super::Jump();
+                bWantsToJump = false;
+            }
+        });
+        GetWorldTimerManager().SetTimer(RecoverTimerHandle, DelayedJumpDelegate, 0.05f, false);
     }
 }
 
@@ -188,10 +206,29 @@ void ARelicsCharacter::StopSprint()
 // Saut Uncharted : override Jump pour appliquer une impulsion vers l'avant
 void ARelicsCharacter::Jump()
 {
-    // Empêche le saut pendant la roulade ou si le personnage est en l'air
-    if (bIsRolling || GetCharacterMovement()->IsFalling())
+    // Anti-spam : empêche le saut si bCanJump est false
+    if (!bCanJump)
         return;
-    Super::Jump();
+
+    // Si le personnage est au sol, saute immédiatement
+    if (!GetCharacterMovement()->IsFalling())
+    {
+        bCanJump = false; // Désactive la possibilité de resauter
+        Super::Jump();
+        // Timer anti-spam : délai augmenté à 1.0s pour éviter tout bug d'animation
+        FTimerDelegate CanJumpDelegate;
+        CanJumpDelegate.BindLambda([this]()
+        {
+            bCanJump = true;
+        });
+        GetWorldTimerManager().SetTimer(RecoverTimerHandle, CanJumpDelegate, 1.0f, false);
+        bWantsToJump = false;
+    }
+    else
+    {
+        bCanJump = true;
+        bWantsToJump = true;
+    }
 }
 
 bool ARelicsCharacter::IsIdleJumping() const
@@ -202,7 +239,10 @@ bool ARelicsCharacter::IsIdleJumping() const
 void ARelicsCharacter::Landed(const FHitResult& Hit)
 {
     Super::Landed(Hit);
-    bIsIdleJump = false; // Reset du statut à l'atterrissage
+    // Permet de resauter immédiatement après l'atterrissage
+    bIsIdleJump = false;
+    // Synchronisation AnimBP : IsInAir doit suivre GetCharacterMovement()->IsFalling()
+    // (à faire dans l'AnimBP Event Graph)
 }
 
 // Retourne le statut de roulade pour l'AnimBP

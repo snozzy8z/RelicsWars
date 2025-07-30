@@ -65,6 +65,12 @@ public:
     bool bCanRoll = true; // Contrôle anti-spam pour la roulade
     UPROPERTY(BlueprintReadOnly, Category = Movement)
     bool bCanJump = true; // Contrôle anti-spam pour le saut
+    UPROPERTY(BlueprintReadOnly, Category = Movement)
+    float LastJumpTime = -100.f; // Temps du dernier saut
+    UPROPERTY(BlueprintReadOnly, Category = Movement)
+    float JumpCooldown = 2.0f; // Cooldown en secondes
+    UPROPERTY(BlueprintReadOnly, Category = Movement)
+    bool bWantsToJump = false; // Indique si le joueur veut sauter
 
 protected:
     // SpringArm pour la caméra third-person épaule gauche
