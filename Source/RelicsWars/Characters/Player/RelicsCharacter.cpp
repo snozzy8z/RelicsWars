@@ -36,8 +36,8 @@ ARelicsCharacter::ARelicsCharacter()
     // Correction : désactive la rotation auto
     bUseControllerRotationYaw = false;
     GetCharacterMovement()->bOrientRotationToMovement = false;
-    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
-    GetCharacterMovement()->JumpZVelocity = 400.f;
+    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed; // Initialise la vitesse de marche par dfaut
+    GetCharacterMovement()->JumpZVelocity = 300.f; // Hauteur de saut rDUITE
 }
 
 void ARelicsCharacter::BeginPlay()
@@ -49,22 +49,25 @@ void ARelicsCharacter::BeginPlay()
 void ARelicsCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    RotateCharacterToMovement(DeltaTime); // Réactivé : le personnage se tourne dans la direction du déplacement
+    // Verrouille la rotation pendant le saut
+    if (!bLockRotationDuringJump)
+    {
+        RotateCharacterToMovement(DeltaTime);
+    }
     if (CameraBoom)
     {
         CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, TargetSocketOffset, DeltaTime, 6.0f);
     }
-    IsInAir = GetCharacterMovement()->IsFalling(); // Met à jour IsInAir à chaque tick
-    // Saut différé : si le joueur veut sauter et le perso est au sol
+    IsInAir = GetCharacterMovement()->IsFalling();
+    // Saut différé
     if (bWantsToJump && GetCharacterMovement()->IsMovingOnGround())
     {
-        // Timer court pour garantir la synchronisation AnimBP (50ms)
         FTimerDelegate DelayedJumpDelegate;
         DelayedJumpDelegate.BindLambda([this]()
         {
             if (bWantsToJump && GetCharacterMovement()->IsMovingOnGround())
             {
-                ACharacter::Jump();
+                Jump();
                 bWantsToJump = false;
             }
         });
@@ -257,6 +260,36 @@ void ARelicsCharacter::Jump()
     {
         bCanJump = false;
         bIsJumping = true;
+        // Prend UNIQUEMENT la direction d'input au moment du saut
+        float ForwardValue = 0.f;
+        float RightValue = 0.f;
+        if (InputComponent)
+        {
+            ForwardValue = InputComponent->GetAxisValue(TEXT("MoveForward"));
+            RightValue = InputComponent->GetAxisValue(TEXT("MoveRight"));
+        }
+        FVector InputDir = FVector::ZeroVector;
+        if (Controller)
+        {
+            FRotator ControlRot = Controller->GetControlRotation();
+            FRotator YawRot(0, ControlRot.Yaw, 0);
+            FVector ForwardDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::X);
+            FVector RightDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::Y);
+            InputDir = ForwardDir * ForwardValue + RightDir * RightValue;
+        }
+        if (InputDir.SizeSquared() < 0.01f)
+        {
+            InputDir = GetActorForwardVector(); // Saut en avant par défaut
+        }
+        JumpDirection = InputDir.GetSafeNormal();
+        // Oriente instantanément le mesh dans la direction du saut
+        SetActorRotation(JumpDirection.Rotation());
+        // Verrouille la rotation pendant le saut
+        bLockRotationDuringJump = true;
+        // Lance le saut dans cette direction SEULE
+        FVector LaunchDir = JumpDirection * JumpForwardSpeed;
+        LaunchDir.Z = GetCharacterMovement()->JumpZVelocity;
+        LaunchCharacter(LaunchDir, true, true);
         ACharacter::Jump();
         OnJumpStarted();
         if (JumpMontage && GetMesh() && GetMesh()->GetAnimInstance())
@@ -286,12 +319,11 @@ void ARelicsCharacter::Landed(const FHitResult& Hit)
     bCanJump = true;
     bIsJumping = false;
     IsInAir = false;
-    // Arrête le montage de saut avec un BlendOutTime de 0.2s pour éviter le snap
+    bLockRotationDuringJump = false; // Déverrouille la rotation normale
     if (JumpMontage && GetMesh() && GetMesh()->GetAnimInstance())
     {
         GetMesh()->GetAnimInstance()->Montage_Stop(0.2f, JumpMontage);
     }
-    // Appelle l'événement Blueprint pour transition cinématique
     OnJumpLanded();
 }
 

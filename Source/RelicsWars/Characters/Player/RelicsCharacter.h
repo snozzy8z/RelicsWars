@@ -143,4 +143,10 @@ protected:
 
     UFUNCTION(BlueprintCallable, Category = "Animation")
     void OnJumpLanded();
+
+    // Saut directionnel Uncharted
+    UPROPERTY(BlueprintReadOnly, Category = Movement)
+    bool bLockRotationDuringJump = false;
+    // Stocke la direction du saut
+    FVector JumpDirection;
 };
