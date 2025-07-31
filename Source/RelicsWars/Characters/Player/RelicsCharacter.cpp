@@ -215,8 +215,14 @@ void ARelicsCharacter::EndRoll()
 void ARelicsCharacter::OnAimPressed()
 {
     bIsAimInputPressed = true;
-    // Active la visée uniquement si pas en saut
-    if (!IsInAir && !bIsJumping)
+    // --- Gestion avancée de la visée pendant le saut ---
+    if (IsInAir || bIsJumping)
+    {
+        bWantsToAimAfterJump = true; // Met à jour l'état si le joueur appuie pendant le saut
+        return;
+    }
+    // Active la visée uniquement si pas en roulade ni en saut
+    if (!bIsRolling && !IsInAir && !bIsJumping)
         bIsAiming = true;
 }
 
@@ -224,18 +230,134 @@ void ARelicsCharacter::OnAimPressed()
 void ARelicsCharacter::OnAimReleased()
 {
     bIsAimInputPressed = false;
+    // --- Gestion avancée de la visée pendant le saut ---
+    if (IsInAir || bIsJumping)
+    {
+        bWantsToAimAfterJump = false; // Met à jour l'état si le joueur relâche pendant le saut
+        return;
+    }
     bIsAiming = false;
 }
 
+// Affecte uniquement la valeur de l'axe
+void ARelicsCharacter::MoveForward(float Value)
+{
+    // En mode visée, on ne bloque pas le déplacement en l'air
+    if (bIsAiming)
+    {
+        AimForward = Value;
+        // Déplacement TPS "in place" : avance/recule lentement, strafe possible
+        if (Controller && FMath::Abs(Value) > KINDA_SMALL_NUMBER)
+        {
+            FRotator ControlRot = Controller->GetControlRotation();
+            FRotator YawRot(0, ControlRot.Yaw, 0);
+            FVector ForwardDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::X);
+            AddMovementInput(ForwardDir, Value * (AimWalkSpeed / WalkSpeed)); // SpeedMultiplier
+        }
+    }
+    else
+    {
+        // Déplacement TPS classique
+        if (GetCharacterMovement()->IsFalling())
+            return;
+        AimForward = Value;
+        if (Controller && Value != 0.0f)
+        {
+            FRotator ControlRot = Controller->GetControlRotation();
+            FRotator YawRot(0, ControlRot.Yaw, 0);
+            FVector ForwardDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::X);
+            InputDirection += ForwardDir * Value;
+        }
+    }
+}
+
+void ARelicsCharacter::MoveRight(float Value)
+{
+    // En mode visée, on ne bloque pas le déplacement en l'air
+    if (bIsAiming)
+    {
+        AimRight = Value;
+        // Déplacement TPS "in place" : strafe gauche/droite lentement
+        if (Controller && FMath::Abs(Value) > KINDA_SMALL_NUMBER)
+        {
+            FRotator ControlRot = Controller->GetControlRotation();
+            FRotator YawRot(0, ControlRot.Yaw, 0);
+            FVector RightDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::Y);
+            AddMovementInput(RightDir, Value * (AimWalkSpeed / WalkSpeed)); // SpeedMultiplier
+        }
+    }
+    else
+    {
+        // Déplacement TPS classique
+        if (GetCharacterMovement()->IsFalling())
+            return;
+        AimRight = Value;
+        if (Controller && Value != 0.0f)
+        {
+            FRotator ControlRot = Controller->GetControlRotation();
+            FRotator YawRot(0, ControlRot.Yaw, 0);
+            FVector RightDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::Y);
+            InputDirection += RightDir * Value;
+        }
+    }
+}
+
+void ARelicsCharacter::Turn(float Value)
+{
+    AddControllerYawInput(Value);
+}
+
+void ARelicsCharacter::LookUp(float Value)
+{
+    AddControllerPitchInput(Value);
+}
+
+// Sprint : active le sprint
+void ARelicsCharacter::StartSprint()
+{
+    if (bIsSprintOnCooldown || bIsSprinting)
+    {
+        OnSprintBlockedFeedback(); // Feedback BP/FX si sprint bloqué
+        return;
+    }
+    bIsSprinting = true;
+    GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
+    SprintTimeLeft = SprintDurationMax;
+}
+
+// Sprint : désactive le sprint
+void ARelicsCharacter::StopSprint()
+{
+    bIsSprinting = false;
+    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+}
+
+void ARelicsCharacter::ResetSprintCooldown()
+{
+    bIsSprintOnCooldown = false;
+    SprintTimeLeft = SprintDurationMax;
+}
+
+// Saut Uncharted : override Jump pour appliquer une impulsion vers l'avant
 void ARelicsCharacter::Jump()
 {
     if (bIsRolling || !bCanJump) return;
-    // Désactive la visée au début du saut
-    bIsAiming = false;
     if (!GetCharacterMovement()->IsFalling())
     {
         bCanJump = false;
         bIsJumping = true;
+        // Désactive la visée si active
+        if (bIsAiming)
+        {
+            bIsAiming = false;
+            bWantsToAimAfterJump = bIsAimInputPressed;
+            UE_LOG(LogTemp, Log, TEXT("Visée désactivée lors du saut."));
+        }
+        else
+        {
+            bWantsToAimAfterJump = false;
+        }
+        // Calcul direction du saut
         float ForwardValue = 0.f;
         float RightValue = 0.f;
         if (InputComponent)
@@ -254,7 +376,7 @@ void ARelicsCharacter::Jump()
         }
         if (InputDir.SizeSquared() < 0.01f)
         {
-            InputDir = GetActorForwardVector();
+            InputDir = GetActorForwardVector(); // Saut en avant par défaut
         }
         JumpDirection = InputDir.GetSafeNormal();
         SetActorRotation(JumpDirection.Rotation());
@@ -263,13 +385,15 @@ void ARelicsCharacter::Jump()
         LaunchDir.Z = GetCharacterMovement()->JumpZVelocity;
         LaunchCharacter(LaunchDir, true, true);
         ACharacter::Jump();
-        OnJumpStarted();
+        // Joue explicitement le montage d'animation de saut
         if (JumpMontage && GetMesh() && GetMesh()->GetAnimInstance())
         {
             GetMesh()->GetAnimInstance()->Montage_Play(JumpMontage, 1.0f);
         }
+        // Appelle OnJumpStarted même si on vient de la visée
+        OnJumpStarted();
         FTimerDelegate CanJumpDelegate;
-        CanJumpDelegate.BindLambda([this]()
+        CanJumpDelegate.BindLambda([this]
         {
             bCanJump = true;
         });
@@ -291,15 +415,23 @@ void ARelicsCharacter::Landed(const FHitResult& Hit)
     bCanJump = true;
     bIsJumping = false;
     IsInAir = false;
-    bLockRotationDuringJump = false;
+    bLockRotationDuringJump = false; // Déverrouille la rotation normale
     if (JumpMontage && GetMesh() && GetMesh()->GetAnimInstance())
     {
         GetMesh()->GetAnimInstance()->Montage_Stop(0.2f, JumpMontage);
     }
     OnJumpLanded();
-    // Si le bouton de visée est toujours pressé, réactive la visée
-    if (bIsAimInputPressed)
-        bIsAiming = true;
+    // Gestion de la visée après le saut (identique à la roulade)
+    if (bWantsToAimAfterJump && bIsAimInputPressed)
+    {
+        bIsAiming = true; // Réactive la visée
+        UE_LOG(LogTemp, Log, TEXT("Visée réactivée après atterrissage (saut)."));
+    }
+    else
+    {
+        bIsAiming = false;
+    }
+    bWantsToAimAfterJump = false; // Reset
 }
 
 void ARelicsCharacter::OnJumpLanded()

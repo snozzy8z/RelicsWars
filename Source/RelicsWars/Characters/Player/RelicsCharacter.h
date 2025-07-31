@@ -191,4 +191,8 @@ protected:
     void OnAimPressed();
     UFUNCTION(BlueprintCallable, Category = "Aim")
     void OnAimReleased();
+
+    // Ajout pour gestion avancée de la visée pendant le saut
+    UPROPERTY(BlueprintReadOnly, Category = "Aim")
+    bool bWantsToAimAfterJump = false;
 };
