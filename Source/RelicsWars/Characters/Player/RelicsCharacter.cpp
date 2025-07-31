@@ -12,14 +12,14 @@ ARelicsCharacter::ARelicsCharacter()
     : InputDirection(FVector::ZeroVector)
     , TargetRotation(FRotator::ZeroRotator)
     , CharacterRotationInterpSpeed(8.0f)
-    , CameraSocketOffset(0.f, 75.f, 65.f)
-    , TargetSocketOffset(0.f, 75.f, 65.f)
+    , CameraSocketOffset(0.f, 60.f, 70.f) // décalage épaule droite, hauteur réaliste
+    , TargetSocketOffset(0.f, 60.f, 70.f) // vue normale
     , WalkSpeed(400.f)
     , SprintSpeed(500.f)
-    , AimWalkSpeed(300.f) // Vitesse de marche en visant
+    , AimWalkSpeed(300.f)
     , bIsSprinting(false)
     , bIsRolling(false)
-    , bIsAiming(false) // Initialise la visée à false
+    , bIsAiming(false)
     , bCanRoll(true)
     , bCanJump(true)
     , LastJumpTime(-100.f)
@@ -29,9 +29,9 @@ ARelicsCharacter::ARelicsCharacter()
     PrimaryActorTick.bCanEverTick = true;
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
-    CameraBoom->TargetArmLength = 300.0f;
+    CameraBoom->TargetArmLength = 350.0f; // distance caméra réaliste TPS
     CameraBoom->bUsePawnControlRotation = true;
-    CameraBoom->SocketOffset = CameraSocketOffset;
+    CameraBoom->SocketOffset = CameraSocketOffset; // décalage épaule droite
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
     FollowCamera->bUsePawnControlRotation = false;
@@ -45,22 +45,31 @@ ARelicsCharacter::ARelicsCharacter()
 void ARelicsCharacter::BeginPlay()
 {
     Super::BeginPlay();
+    // S'assure que la caméra est bien positionnée au démarrage
+    if (CameraBoom)
+    {
+        CameraBoom->SocketOffset = DefaultSocketOffset;
+    }
+    if (FollowCamera)
+    {
+        FollowCamera->SetFieldOfView(DefaultFOV);
+    }
+    TargetSocketOffset = DefaultSocketOffset;
 }
 
 // Tick : gère la rotation fluide du personnage et l'interpolation dynamique de la caméra
 void ARelicsCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    // Interpolation douce de la caméra et FOV selon le mode de visée
+    // Blend fluide entre TPS et visée
+    CameraBlendAlpha = FMath::FInterpTo(CameraBlendAlpha, bIsAiming ? 1.0f : 0.0f, DeltaTime, CameraBlendSpeed);
     if (CameraBoom)
     {
-        CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, TargetSocketOffset, DeltaTime, CameraArmInterpSpeed);
+        CameraBoom->SocketOffset = FMath::Lerp(TPS_SocketOffset, Aim_SocketOffset, CameraBlendAlpha);
     }
     if (FollowCamera)
     {
-        float TargetFOV = bIsAiming ? AimFOV : DefaultFOV;
-        float CurrentFOV = FollowCamera->FieldOfView;
-        FollowCamera->SetFieldOfView(FMath::FInterpTo(CurrentFOV, TargetFOV, DeltaTime, 10.0f));
+        FollowCamera->SetFieldOfView(FMath::Lerp(TPS_FOV, Aim_FOV, CameraBlendAlpha));
     }
     // Option Pro : tourner le mesh en même temps que la caméra en visée
     if (bIsAiming && Controller)
@@ -141,14 +150,14 @@ void ARelicsCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
     PlayerInputComponent->BindAction("Sprint", IE_Pressed, this, &ARelicsCharacter::StartSprint);
     PlayerInputComponent->BindAction("Sprint", IE_Released, this, &ARelicsCharacter::StopSprint);
     PlayerInputComponent->BindAction("Roll", IE_Pressed, this, &ARelicsCharacter::StartRoll);
-    PlayerInputComponent->BindAction("Aim", IE_Pressed, this, &ARelicsCharacter::StartAim);
-    PlayerInputComponent->BindAction("Aim", IE_Released, this, &ARelicsCharacter::StopAim);
+    PlayerInputComponent->BindAction("Aim", IE_Pressed, this, &ARelicsCharacter::OnAimPressed);
+    PlayerInputComponent->BindAction("Aim", IE_Released, this, &ARelicsCharacter::OnAimReleased);
 }
 
 // --- Système de roulade avant fluide ---
 void ARelicsCharacter::StartRoll()
 {
-    // Empêche la relance si une roulade est déjà en cours, si le personnage est en l'air, si l'anti-spam est actif ou si idle
+    // Empêche la relance si une roulade est déjà en cours, si le cooldown est actif, ou si le personnage n'est pas au sol
     if (bIsRolling || !bCanRoll || GetCharacterMovement()->IsFalling())
         return;
 
@@ -156,32 +165,28 @@ void ARelicsCharacter::StartRoll()
     if (GetVelocity().Size2D() < 10.f)
         return;
 
+    // Désactive la visée au début de la roulade
+    bIsAiming = false;
     bIsRolling = true;
     bCanRoll = false;
-    bCanJump = false; // Bloque le saut pendant la roulade
-    // Stocke la friction originale
+    bCanJump = false;
     SavedBrakingFrictionFactor = GetCharacterMovement()->BrakingFrictionFactor;
-    // Désactive temporairement le freinage
     GetCharacterMovement()->BrakingFrictionFactor = 0.f;
 
-    // Lance le personnage vers l'avant
     FVector LaunchDir = GetActorForwardVector() * 600.f;
     LaunchCharacter(LaunchDir, true, true);
 
-    OnRollStarted(); // Event BP pour custom logic si besoin
+    OnRollStarted();
 
-    // Joue le montage de roulade
     if (RollMontage && GetMesh() && GetMesh()->GetAnimInstance())
     {
         GetMesh()->GetAnimInstance()->Montage_Play(RollMontage, 1.0f);
     }
 
-    // Timer pour la fin de la roulade (0.8s)
     FTimerDelegate RollEndDelegate;
     RollEndDelegate.BindLambda([this]()
     {
         EndRoll();
-        // Timer anti-spam : délai avant de pouvoir relancer (0.2s)
         FTimerDelegate CanRollDelegate;
         CanRollDelegate.BindLambda([this]()
         {
@@ -194,125 +199,43 @@ void ARelicsCharacter::StartRoll()
 
 void ARelicsCharacter::EndRoll()
 {
-    // Remet la friction originale
     GetCharacterMovement()->BrakingFrictionFactor = SavedBrakingFrictionFactor;
     bIsRolling = false;
-    bCanJump = true; // Autorise le saut après la roulade
-    // Stoppe le montage de roulade
+    bCanJump = true;
     if (RollMontage && GetMesh() && GetMesh()->GetAnimInstance())
     {
         GetMesh()->GetAnimInstance()->Montage_Stop(0.2f, RollMontage);
     }
+    // Si le bouton de visée est toujours pressé, réactive la visée
+    if (bIsAimInputPressed)
+        bIsAiming = true;
 }
 
-// Affecte uniquement la valeur de l'axe
-void ARelicsCharacter::MoveForward(float Value)
+// Handler d'input Aim (Pressed)
+void ARelicsCharacter::OnAimPressed()
 {
-    // En mode visée, on ne bloque pas le déplacement en l'air
-    if (bIsAiming)
-    {
-        AimForward = Value;
-        // Déplacement TPS "in place" : avance/recule lentement, strafe possible
-        if (Controller && FMath::Abs(Value) > KINDA_SMALL_NUMBER)
-        {
-            FRotator ControlRot = Controller->GetControlRotation();
-            FRotator YawRot(0, ControlRot.Yaw, 0);
-            FVector ForwardDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::X);
-            AddMovementInput(ForwardDir, Value * (AimWalkSpeed / WalkSpeed)); // SpeedMultiplier
-        }
-    }
-    else
-    {
-        // Déplacement TPS classique
-        if (GetCharacterMovement()->IsFalling())
-            return;
-        AimForward = Value;
-        if (Controller && Value != 0.0f)
-        {
-            FRotator ControlRot = Controller->GetControlRotation();
-            FRotator YawRot(0, ControlRot.Yaw, 0);
-            FVector ForwardDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::X);
-            InputDirection += ForwardDir * Value;
-        }
-    }
+    bIsAimInputPressed = true;
+    // Active la visée uniquement si pas en saut
+    if (!IsInAir && !bIsJumping)
+        bIsAiming = true;
 }
 
-void ARelicsCharacter::MoveRight(float Value)
+// Handler d'input Aim (Released)
+void ARelicsCharacter::OnAimReleased()
 {
-    // En mode visée, on ne bloque pas le déplacement en l'air
-    if (bIsAiming)
-    {
-        AimRight = Value;
-        // Déplacement TPS "in place" : strafe gauche/droite lentement
-        if (Controller && FMath::Abs(Value) > KINDA_SMALL_NUMBER)
-        {
-            FRotator ControlRot = Controller->GetControlRotation();
-            FRotator YawRot(0, ControlRot.Yaw, 0);
-            FVector RightDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::Y);
-            AddMovementInput(RightDir, Value * (AimWalkSpeed / WalkSpeed)); // SpeedMultiplier
-        }
-    }
-    else
-    {
-        // Déplacement TPS classique
-        if (GetCharacterMovement()->IsFalling())
-            return;
-        AimRight = Value;
-        if (Controller && Value != 0.0f)
-        {
-            FRotator ControlRot = Controller->GetControlRotation();
-            FRotator YawRot(0, ControlRot.Yaw, 0);
-            FVector RightDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::Y);
-            InputDirection += RightDir * Value;
-        }
-    }
+    bIsAimInputPressed = false;
+    bIsAiming = false;
 }
 
-void ARelicsCharacter::Turn(float Value)
-{
-    AddControllerYawInput(Value);
-}
-
-void ARelicsCharacter::LookUp(float Value)
-{
-    AddControllerPitchInput(Value);
-}
-
-// Sprint : active le sprint
-void ARelicsCharacter::StartSprint()
-{
-    if (bIsSprintOnCooldown || bIsSprinting)
-    {
-        OnSprintBlockedFeedback(); // Feedback BP/FX si sprint bloqué
-        return;
-    }
-    bIsSprinting = true;
-    GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
-    SprintTimeLeft = SprintDurationMax;
-}
-
-// Sprint : désactive le sprint
-void ARelicsCharacter::StopSprint()
-{
-    bIsSprinting = false;
-    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
-}
-
-void ARelicsCharacter::ResetSprintCooldown()
-{
-    bIsSprintOnCooldown = false;
-    SprintTimeLeft = SprintDurationMax;
-}
-
-// Saut Uncharted : override Jump pour appliquer une impulsion vers l'avant
 void ARelicsCharacter::Jump()
 {
     if (bIsRolling || !bCanJump) return;
+    // Désactive la visée au début du saut
+    bIsAiming = false;
     if (!GetCharacterMovement()->IsFalling())
     {
         bCanJump = false;
         bIsJumping = true;
-        // Prend UNIQUEMENT la direction d'input au moment du saut
         float ForwardValue = 0.f;
         float RightValue = 0.f;
         if (InputComponent)
@@ -331,14 +254,11 @@ void ARelicsCharacter::Jump()
         }
         if (InputDir.SizeSquared() < 0.01f)
         {
-            InputDir = GetActorForwardVector(); // Saut en avant par défaut
+            InputDir = GetActorForwardVector();
         }
         JumpDirection = InputDir.GetSafeNormal();
-        // Oriente instantanément le mesh dans la direction du saut
         SetActorRotation(JumpDirection.Rotation());
-        // Verrouille la rotation pendant le saut
         bLockRotationDuringJump = true;
-        // Lance le saut dans cette direction SEULE
         FVector LaunchDir = JumpDirection * JumpForwardSpeed;
         LaunchDir.Z = GetCharacterMovement()->JumpZVelocity;
         LaunchCharacter(LaunchDir, true, true);
@@ -371,12 +291,15 @@ void ARelicsCharacter::Landed(const FHitResult& Hit)
     bCanJump = true;
     bIsJumping = false;
     IsInAir = false;
-    bLockRotationDuringJump = false; // Déverrouille la rotation normale
+    bLockRotationDuringJump = false;
     if (JumpMontage && GetMesh() && GetMesh()->GetAnimInstance())
     {
         GetMesh()->GetAnimInstance()->Montage_Stop(0.2f, JumpMontage);
     }
     OnJumpLanded();
+    // Si le bouton de visée est toujours pressé, réactive la visée
+    if (bIsAimInputPressed)
+        bIsAiming = true;
 }
 
 void ARelicsCharacter::OnJumpLanded()
@@ -398,30 +321,13 @@ bool ARelicsCharacter::IsRolling() const
 // Gestion de la visée TPS
 void ARelicsCharacter::StartAim()
 {
+    // Empêche la visée pendant la roulade ou le saut
+    if (bIsRolling || IsInAir || bIsJumping)
+        return;
     bIsAiming = true;
-    GetCharacterMovement()->MaxWalkSpeed = AimWalkSpeed;
-    bIsSprinting = false;
-    // Oriente le mesh dans l'axe caméra
-    if (Controller)
-    {
-        FRotator ControlRot = Controller->GetControlRotation();
-        FRotator YawRot(0, ControlRot.Yaw, 0);
-        SetActorRotation(YawRot);
-    }
-    TargetSocketOffset = AimSocketOffset;
-    if (FollowCamera)
-    {
-        FollowCamera->SetFieldOfView(AimFOV);
-    }
 }
 
 void ARelicsCharacter::StopAim()
 {
     bIsAiming = false;
-    GetCharacterMovement()->MaxWalkSpeed = DefaultWalkSpeed;
-    TargetSocketOffset = DefaultSocketOffset;
-    if (FollowCamera)
-    {
-        FollowCamera->SetFieldOfView(DefaultFOV);
-    }
 }

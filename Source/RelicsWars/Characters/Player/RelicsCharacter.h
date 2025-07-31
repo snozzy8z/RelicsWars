@@ -109,6 +109,20 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Aim")
     void StopAim();
 
+    // --- Caméra TPS/Visée Uncharted 4 ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Camera)
+    FVector TPS_SocketOffset = FVector(0, 60, 50);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Camera)
+    FVector Aim_SocketOffset = FVector(10, 32, 60);
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Camera)
+    float TPS_FOV = 88.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Camera)
+    float Aim_FOV = 58.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Camera)
+    float CameraBlendAlpha = 0.0f;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Camera)
+    float CameraBlendSpeed = 8.0f;
+
 protected:
     // SpringArm pour la caméra third-person épaule gauche
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera)
@@ -143,7 +157,8 @@ protected:
     // Champs pour la visée
     float DefaultFOV = 90.f;
     float AimFOV = 70.f;
-    FVector AimSocketOffset = FVector(0.f, 40.f, 90.f);
+    // Offset caméra visée épaule droite (Uncharted style)
+    FVector AimSocketOffset = FVector(0.f, 40.f, 90.f); // X=avant/arrière, Y=latéral (épaule droite), Z=hauteur
     float DefaultWalkSpeed = 400.f;
     float AimWalkSpeed = 200.f;
 
@@ -166,4 +181,14 @@ protected:
     bool bLockRotationDuringJump = false;
     // Stocke la direction du saut
     FVector JumpDirection;
+
+    // Ajoute la variable pour stocker l'état du bouton de visée
+    UPROPERTY(BlueprintReadOnly, Category = "Aim")
+    bool bIsAimInputPressed = false;
+
+    // Ajoute les handlers d'input
+    UFUNCTION(BlueprintCallable, Category = "Aim")
+    void OnAimPressed();
+    UFUNCTION(BlueprintCallable, Category = "Aim")
+    void OnAimReleased();
 };
