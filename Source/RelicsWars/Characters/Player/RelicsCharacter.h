@@ -97,6 +97,18 @@ public:
     void OnSprintBlockedFeedback();
     void ResetSprintCooldown();
 
+    // Visée TPS
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Aim")
+    bool bIsAiming = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Aim")
+    float AimForward = 0.f;
+    UPROPERTY(BlueprintReadOnly, Category = "Aim")
+    float AimRight = 0.f;
+    UFUNCTION(BlueprintCallable, Category = "Aim")
+    void StartAim();
+    UFUNCTION(BlueprintCallable, Category = "Aim")
+    void StopAim();
+
 protected:
     // SpringArm pour la caméra third-person épaule gauche
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Camera)
@@ -124,11 +136,16 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Camera)
     FVector DefaultSocketOffset = FVector(0.f, 60.f, 70.f);
     // Pour la visée (à implémenter plus tard)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Camera)
-    bool bIsAiming = false;
     FVector CameraSocketOffset = FVector(0.f, 75.f, 65.f);
     // Offset cible pour effets dynamiques (ex : visée, focus)
     FVector TargetSocketOffset = FVector(0.f, 75.f, 65.f);
+
+    // Champs pour la visée
+    float DefaultFOV = 90.f;
+    float AimFOV = 70.f;
+    FVector AimSocketOffset = FVector(0.f, 40.f, 90.f);
+    float DefaultWalkSpeed = 400.f;
+    float AimWalkSpeed = 200.f;
 
     // Fonctions d'input
     void MoveForward(float Value);

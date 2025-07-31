@@ -16,8 +16,10 @@ ARelicsCharacter::ARelicsCharacter()
     , TargetSocketOffset(0.f, 75.f, 65.f)
     , WalkSpeed(400.f)
     , SprintSpeed(500.f)
+    , AimWalkSpeed(300.f) // Vitesse de marche en visant
     , bIsSprinting(false)
     , bIsRolling(false)
+    , bIsAiming(false) // Initialise la visée à false
     , bCanRoll(true)
     , bCanJump(true)
     , LastJumpTime(-100.f)
@@ -49,14 +51,27 @@ void ARelicsCharacter::BeginPlay()
 void ARelicsCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    // Verrouille la rotation pendant le saut
-    if (!bLockRotationDuringJump)
-    {
-        RotateCharacterToMovement(DeltaTime);
-    }
+    // Interpolation douce de la caméra et FOV selon le mode de visée
     if (CameraBoom)
     {
-        CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, TargetSocketOffset, DeltaTime, 6.0f);
+        CameraBoom->SocketOffset = FMath::VInterpTo(CameraBoom->SocketOffset, TargetSocketOffset, DeltaTime, CameraArmInterpSpeed);
+    }
+    if (FollowCamera)
+    {
+        float TargetFOV = bIsAiming ? AimFOV : DefaultFOV;
+        float CurrentFOV = FollowCamera->FieldOfView;
+        FollowCamera->SetFieldOfView(FMath::FInterpTo(CurrentFOV, TargetFOV, DeltaTime, 10.0f));
+    }
+    // Option Pro : tourner le mesh en même temps que la caméra en visée
+    if (bIsAiming && Controller)
+    {
+        FRotator ControlRot = Controller->GetControlRotation();
+        FRotator YawRot(0, ControlRot.Yaw, 0);
+        SetActorRotation(YawRot);
+    }
+    else if (!bLockRotationDuringJump)
+    {
+        RotateCharacterToMovement(DeltaTime);
     }
     IsInAir = GetCharacterMovement()->IsFalling();
     // Saut différé
@@ -125,8 +140,9 @@ void ARelicsCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
     PlayerInputComponent->BindAction("Jump", IE_Released, this, &ACharacter::StopJumping);
     PlayerInputComponent->BindAction("Sprint", IE_Pressed, this, &ARelicsCharacter::StartSprint);
     PlayerInputComponent->BindAction("Sprint", IE_Released, this, &ARelicsCharacter::StopSprint);
-    // Bind roulade sur la touche C (action "Roll")
     PlayerInputComponent->BindAction("Roll", IE_Pressed, this, &ARelicsCharacter::StartRoll);
+    PlayerInputComponent->BindAction("Aim", IE_Pressed, this, &ARelicsCharacter::StartAim);
+    PlayerInputComponent->BindAction("Aim", IE_Released, this, &ARelicsCharacter::StopAim);
 }
 
 // --- Système de roulade avant fluide ---
@@ -192,27 +208,63 @@ void ARelicsCharacter::EndRoll()
 // Affecte uniquement la valeur de l'axe
 void ARelicsCharacter::MoveForward(float Value)
 {
-    if (GetCharacterMovement()->IsFalling())
-        return;
-    if (Controller && Value != 0.0f)
+    // En mode visée, on ne bloque pas le déplacement en l'air
+    if (bIsAiming)
     {
-        FRotator ControlRot = Controller->GetControlRotation();
-        FRotator YawRot(0, ControlRot.Yaw, 0);
-        FVector ForwardDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::X);
-        InputDirection += ForwardDir * Value;
+        AimForward = Value;
+        // Déplacement TPS "in place" : avance/recule lentement, strafe possible
+        if (Controller && FMath::Abs(Value) > KINDA_SMALL_NUMBER)
+        {
+            FRotator ControlRot = Controller->GetControlRotation();
+            FRotator YawRot(0, ControlRot.Yaw, 0);
+            FVector ForwardDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::X);
+            AddMovementInput(ForwardDir, Value * (AimWalkSpeed / WalkSpeed)); // SpeedMultiplier
+        }
+    }
+    else
+    {
+        // Déplacement TPS classique
+        if (GetCharacterMovement()->IsFalling())
+            return;
+        AimForward = Value;
+        if (Controller && Value != 0.0f)
+        {
+            FRotator ControlRot = Controller->GetControlRotation();
+            FRotator YawRot(0, ControlRot.Yaw, 0);
+            FVector ForwardDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::X);
+            InputDirection += ForwardDir * Value;
+        }
     }
 }
 
 void ARelicsCharacter::MoveRight(float Value)
 {
-    if (GetCharacterMovement()->IsFalling())
-        return;
-    if (Controller && Value != 0.0f)
+    // En mode visée, on ne bloque pas le déplacement en l'air
+    if (bIsAiming)
     {
-        FRotator ControlRot = Controller->GetControlRotation();
-        FRotator YawRot(0, ControlRot.Yaw, 0);
-        FVector RightDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::Y);
-        InputDirection += RightDir * Value;
+        AimRight = Value;
+        // Déplacement TPS "in place" : strafe gauche/droite lentement
+        if (Controller && FMath::Abs(Value) > KINDA_SMALL_NUMBER)
+        {
+            FRotator ControlRot = Controller->GetControlRotation();
+            FRotator YawRot(0, ControlRot.Yaw, 0);
+            FVector RightDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::Y);
+            AddMovementInput(RightDir, Value * (AimWalkSpeed / WalkSpeed)); // SpeedMultiplier
+        }
+    }
+    else
+    {
+        // Déplacement TPS classique
+        if (GetCharacterMovement()->IsFalling())
+            return;
+        AimRight = Value;
+        if (Controller && Value != 0.0f)
+        {
+            FRotator ControlRot = Controller->GetControlRotation();
+            FRotator YawRot(0, ControlRot.Yaw, 0);
+            FVector RightDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::Y);
+            InputDirection += RightDir * Value;
+        }
     }
 }
 
@@ -341,4 +393,35 @@ bool ARelicsCharacter::IsIdleJumping() const
 bool ARelicsCharacter::IsRolling() const
 {
     return bIsRolling;
+}
+
+// Gestion de la visée TPS
+void ARelicsCharacter::StartAim()
+{
+    bIsAiming = true;
+    GetCharacterMovement()->MaxWalkSpeed = AimWalkSpeed;
+    bIsSprinting = false;
+    // Oriente le mesh dans l'axe caméra
+    if (Controller)
+    {
+        FRotator ControlRot = Controller->GetControlRotation();
+        FRotator YawRot(0, ControlRot.Yaw, 0);
+        SetActorRotation(YawRot);
+    }
+    TargetSocketOffset = AimSocketOffset;
+    if (FollowCamera)
+    {
+        FollowCamera->SetFieldOfView(AimFOV);
+    }
+}
+
+void ARelicsCharacter::StopAim()
+{
+    bIsAiming = false;
+    GetCharacterMovement()->MaxWalkSpeed = DefaultWalkSpeed;
+    TargetSocketOffset = DefaultSocketOffset;
+    if (FollowCamera)
+    {
+        FollowCamera->SetFieldOfView(DefaultFOV);
+    }
 }
