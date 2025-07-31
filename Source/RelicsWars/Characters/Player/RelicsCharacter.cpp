@@ -286,10 +286,18 @@ void ARelicsCharacter::Landed(const FHitResult& Hit)
     bCanJump = true;
     bIsJumping = false;
     IsInAir = false;
+    // Arrête le montage de saut avec un BlendOutTime de 0.2s pour éviter le snap
     if (JumpMontage && GetMesh() && GetMesh()->GetAnimInstance())
     {
         GetMesh()->GetAnimInstance()->Montage_Stop(0.2f, JumpMontage);
     }
+    // Appelle l'événement Blueprint pour transition cinématique
+    OnJumpLanded();
+}
+
+void ARelicsCharacter::OnJumpLanded()
+{
+    // Logique supplémentaire pour la transition Idle/Run peut être ajoutée ici ou dans le Blueprint
 }
 
 bool ARelicsCharacter::IsIdleJumping() const

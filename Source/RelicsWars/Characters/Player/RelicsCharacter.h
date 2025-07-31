@@ -140,4 +140,7 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
     UAnimMontage* JumpMontage;
+
+    UFUNCTION(BlueprintCallable, Category = "Animation")
+    void OnJumpLanded();
 };
