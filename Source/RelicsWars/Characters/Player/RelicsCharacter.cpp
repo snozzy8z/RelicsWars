@@ -14,36 +14,30 @@ ARelicsCharacter::ARelicsCharacter()
     , CharacterRotationInterpSpeed(8.0f)
     , CameraSocketOffset(0.f, 75.f, 65.f)
     , TargetSocketOffset(0.f, 75.f, 65.f)
-    , WalkSpeed(400.f) // Vitesse de jog légèrement augmentée
-    , SprintSpeed(500.f) // Vitesse de sprint réaliste Uncharted 2
+    , WalkSpeed(400.f)
+    , SprintSpeed(500.f)
     , bIsSprinting(false)
-    , bIsRolling(false) // Initialise le statut de roulade
-    , bCanRoll(true) // Initialise le statut anti-spam de roulade
-    , bCanJump(true) // Initialise le statut anti-spam de saut
-    , LastJumpTime(-100.f) // Initialise le temps du dernier saut
-    , JumpCooldown(2.0f) // Cooldown de saut
-    , bWantsToJump(false) // Initialise la demande de saut différé
+    , bIsRolling(false)
+    , bCanRoll(true)
+    , bCanJump(true)
+    , LastJumpTime(-100.f)
+    , JumpCooldown(2.0f)
+    , bWantsToJump(false)
 {
     PrimaryActorTick.bCanEverTick = true;
-
-    // SpringArm pour vue épaule
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
     CameraBoom->TargetArmLength = 300.0f;
     CameraBoom->bUsePawnControlRotation = true;
     CameraBoom->SocketOffset = CameraSocketOffset;
-
-    // Caméra third-person
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
     FollowCamera->bUsePawnControlRotation = false;
-
-    // Désynchronise la rotation du personnage et de la caméra
+    // Correction : désactive la rotation auto
     bUseControllerRotationYaw = false;
-    GetCharacterMovement()->bOrientRotationToMovement = true; // Active la rotation automatique vers le déplacement
-
-    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed; // Initialise la vitesse de marche par défaut
-    GetCharacterMovement()->JumpZVelocity = 400.f; // Hauteur de saut réduite
+    GetCharacterMovement()->bOrientRotationToMovement = false;
+    GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+    GetCharacterMovement()->JumpZVelocity = 400.f;
 }
 
 void ARelicsCharacter::BeginPlay()
@@ -102,18 +96,17 @@ void ARelicsCharacter::Tick(float DeltaTime)
 
 void ARelicsCharacter::RotateCharacterToMovement(float DeltaTime)
 {
-    // Tourne le personnage dans la direction du déplacement (ZQSD)
-    FVector MoveDir = FVector(InputDirection.X, InputDirection.Y, 0.f);
-    if (MoveDir.Size() > 0.1f)
+    FVector MoveDir = InputDirection;
+    if (MoveDir.SizeSquared() > 0.1f)
     {
-        // Applique le mouvement dans la bonne direction
         AddMovementInput(MoveDir.GetSafeNormal(), MoveDir.Size());
-        // Interpolation de la rotation du personnage
         FRotator CurrentRotation = GetActorRotation();
         FRotator DesiredRotation = MoveDir.Rotation();
-        TargetRotation = FMath::RInterpTo(CurrentRotation, DesiredRotation, DeltaTime, CharacterRotationInterpSpeed);
-        SetActorRotation(TargetRotation);
+        FRotator NewRotation = FMath::RInterpTo(CurrentRotation, DesiredRotation, DeltaTime, CharacterRotationInterpSpeed);
+        SetActorRotation(NewRotation);
     }
+    // Reset InputDirection après traitement pour éviter la rotation à l'arrêt
+    InputDirection = FVector::ZeroVector;
 }
 
 // Setup des inputs : bind les axes et actions
@@ -196,18 +189,28 @@ void ARelicsCharacter::EndRoll()
 // Affecte uniquement la valeur de l'axe
 void ARelicsCharacter::MoveForward(float Value)
 {
-    // Bloque le déplacement si le personnage saute (est en l'air)
     if (GetCharacterMovement()->IsFalling())
         return;
-    InputDirection.X = -Value; // Inversion : Z = +1 (avant), S = -1 (arrière)
+    if (Controller && Value != 0.0f)
+    {
+        FRotator ControlRot = Controller->GetControlRotation();
+        FRotator YawRot(0, ControlRot.Yaw, 0);
+        FVector ForwardDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::X);
+        InputDirection += ForwardDir * Value;
+    }
 }
 
 void ARelicsCharacter::MoveRight(float Value)
 {
-    // Bloque le déplacement si le personnage saute (est en l'air)
     if (GetCharacterMovement()->IsFalling())
         return;
-    InputDirection.Y = -Value; // ZQSD : Q = -1 (gauche), D = +1 (droite)
+    if (Controller && Value != 0.0f)
+    {
+        FRotator ControlRot = Controller->GetControlRotation();
+        FRotator YawRot(0, ControlRot.Yaw, 0);
+        FVector RightDir = FRotationMatrix(YawRot).GetUnitAxis(EAxis::Y);
+        InputDirection += RightDir * Value;
+    }
 }
 
 void ARelicsCharacter::Turn(float Value)
